@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
@@ -13,9 +14,52 @@ def _env(name: str, default: str) -> str:
     return v if v is not None and v.strip() != "" else default
 
 
+def _cors_origins() -> List[str]:
+    configured = os.getenv("CORS_ALLOW_ORIGINS")
+    if configured:
+        return [origin.strip() for origin in configured.split(",") if origin.strip()]
+
+    return [
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins(),
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+def _ensure_schema(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS gps_latest (
+          vehicle_id TEXT PRIMARY KEY,
+          lat REAL NOT NULL,
+          lon REAL NOT NULL,
+          speed_kph REAL NOT NULL,
+          ts TEXT NOT NULL
+        );
+        """
+    )
+    conn.commit()
+
+
 def _get_conn() -> sqlite3.Connection:
     sqlite_path = _env("SQLITE_PATH", "/data/traffic.db")
-    return sqlite3.connect(sqlite_path, check_same_thread=False)
+    sqlite_dir = os.path.dirname(sqlite_path)
+    if sqlite_dir:
+        os.makedirs(sqlite_dir, exist_ok=True)
+
+    conn = sqlite3.connect(sqlite_path, check_same_thread=False)
+    _ensure_schema(conn)
+    return conn
 
 
 @app.get("/health")
